@@ -3,6 +3,10 @@ FROM debian:bullseye-slim
 WORKDIR /
 ARG DEBIAN_FRONTEND=noninteractive
 ENV VCPKG_FORCE_SYSTEM_BINARIES=1
+
+RUN sed -i "s|deb.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list && \
+    sed -i "s|security.debian.org|mirrors.aliyun.com|g" /etc/apt/sources.list
+
 RUN apt update -y && \
     apt install --yes --no-install-recommends \
         g++ \
@@ -32,17 +36,23 @@ RUN apt update -y && \
         ca-certificates \
         ninja-build && \
         rm -rf /var/lib/apt/lists/*
+COPY cmake-3.30.6.tar.gz /cmake-3.30.6.tar.gz
 
-RUN wget https://github.com/Kitware/CMake/releases/download/v3.30.6/cmake-3.30.6.tar.gz --no-check-certificate && \
-    tar xzf cmake-3.30.6.tar.gz && \
+RUN tar xzf cmake-3.30.6.tar.gz && \
     cd cmake-3.30.6 && \
     ./configure  --prefix=/usr/local && \
     make && \
     make install
 
-RUN git clone --branch 2023.04.15 --depth=1 https://github.com/microsoft/vcpkg && \
-    /vcpkg/bootstrap-vcpkg.sh -disableMetrics && \
-    /vcpkg/vcpkg --disable-metrics install libvpx libyuv opus aom
+# 使用 Gitee 镜像加速
+RUN git clone https://gitee.com/mirrors/vcpkg /vcpkg
+# 替换 aom 的下载源为 GitHub 镜像
+RUN sed -i 's|https://aomedia.googlesource.com/aom|https://gitcode.com/yanceyxin/libaom|g' /vcpkg/ports/aom/portfile.cmake
+
+RUN cd /vcpkg && \
+    ./bootstrap-vcpkg.sh -disableMetrics && \
+    ./vcpkg --disable-metrics install libvpx libyuv opus aom
+
 
 RUN groupadd -r user && \
     useradd -r -g user user --home /home/user && \
@@ -58,7 +68,17 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > rustup.sh && \
     chmod +x rustup.sh && \
     ./rustup.sh -y
 
+RUN echo '[source.crates-io]' > ~/.cargo/config \
+ && echo 'registry = "https://github.com/rust-lang/crates.io-index"'  >> ~/.cargo/config \
+ && echo '# 替换成你偏好的镜像源'  >> ~/.cargo/config \
+ && echo "replace-with = 'sjtu'"  >> ~/.cargo/config \
+ && echo '# 上海交通大学'   >> ~/.cargo/config \
+ && echo '[source.sjtu]'   >> ~/.cargo/config \
+ && echo 'registry = "https://mirrors.sjtug.sjtu.edu.cn/git/crates.io-index"'  >> ~/.cargo/config \
+ && echo '' >> ~/.cargo/config
+
 USER root
+
 ENV HOME=/home/user
 COPY ./entrypoint.sh /
 ENTRYPOINT ["/entrypoint.sh"]
